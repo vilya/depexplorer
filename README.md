@@ -15,7 +15,7 @@ Running
 
 If the script is in your path & has execute permission:
 
-  depexplorer [ _file-or-dir_ ]
+    depexplorer [ _file-or-dir_ ]
 
 The _file-or-dir_ argument is optional. It can be either the path to a module
 list file (see below) or to a directory. If it's a directory, then we will
@@ -38,7 +38,7 @@ source code and how it's divided up into modules.
 
 Each line of the file has the form
 
-  _module-name_ _module-root_
+    _module-name_ _module-root_
 
 Where _module-name_ is a short displayable name for the module, which you can
 use as input to the various commands which take modules as arguments; and
@@ -71,7 +71,7 @@ Bugs, feedback and contributions
 
 The project page for this script is:
 
-  https://github.com/vilya/depexplorer
+    https://github.com/vilya/depexplorer
 
 If you have any bug reports or suggestions, please use the issue reporting
 system there.
