@@ -1,0 +1,227 @@
+#!/usr/bin/env python
+
+import os, re, sys
+import optparse
+import readline
+
+
+INCLUDE_RE = re.compile(r'\s*#include\s*[<"]([^">]+)[>"]')
+
+
+class Deps(object):
+  def __init__(self, modules):
+    self.modules = [name for name, _ in modules]
+    self.module_roots = dict(modules)
+    self.file_modules = {}
+    self.file_deps = {}
+    self.module_deps = {}
+
+  def __is_source_file(self, filename):
+    return os.path.splitext(filename)[1].lower() in ('.h', '.hpp', '.c', '.cpp')
+
+  def __prefixed_sources(self, prefix, filenames):
+    return [os.path.join(prefix, f) for f in filenames if self.__is_source_file(f)]
+
+  def __included_files(self, filename):
+    filenames = set([])
+    with open(filename) as f:
+      for line in f:
+        m = INCLUDE_RE.match(line)
+        if m:
+          filenames.add(m.group(1))
+    return filenames
+
+  def build_file_module_map(self):
+    """Build up a mapping from relative paths (relative to their module root) back
+       to the module they belong to."""
+    for m, base_path in self.module_roots.iteritems():
+      local_path_offset = len(base_path) + len(os.sep)
+      for path, subdirs, filenames in os.walk(base_path):
+        local_path = path[local_path_offset:]
+        source_files = self.__prefixed_sources(local_path, filenames)
+        for s in source_files:
+          if s in self.file_modules:
+            print >> sys.stderr, "Name collision: %s exists in both %s and %s" % (s, self.file_modules[s], m)
+          else:
+            self.file_modules[s] = m
+  
+  def build_file_deps_map(self):
+    """Build up a mapping from each source and header file to the set of files
+       they include from any module (including their own). You must call
+       build_file_module_map before calling this."""
+    for s, m1 in self.file_modules.iteritems():
+      filename = os.path.join(self.module_roots[m1], s)
+      incs = [i for i in self.__included_files(filename) if i in self.file_modules]
+      self.file_deps[s] = incs
+
+  def build_module_deps_map(self):
+    """For every source and header file in every module, parse out the #include
+       statements to figure out which other modules it depends on. You must
+       have called build_file_module_map and build_file_deps_map before calling
+       this."""
+    for m in self.modules:
+      self.module_deps[m] = set([])
+    for s, deps in self.file_deps.iteritems():
+      m = self.file_modules[s]
+      for d in deps:
+        m2 = self.file_modules[d]
+        if m2 != m:
+          self.module_deps[m].add(m2)
+
+  def root(self, m):
+    """Return the root path for module m."""
+    return self.module_roots.get(m)
+
+  def incoming(self, m):
+    """Return the list of modules that depend on module m."""
+    if m not in self.module_deps:
+      return []
+    return sorted([m2 for m2 in self.modules if m in self.module_deps[m2]])
+
+  def outgoing(self, m):
+    """Return the list of modules that module m depends on."""
+    return sorted(self.module_deps.get(m, []))
+
+  def contents(self, m):
+    """Return the list of files in module m."""
+    return sorted([s for s, m2 in self.file_modules.iteritems() if m2 == m])
+
+  def module_for(self, f):
+    """Return the name of the module that file f belongs to."""
+    return self.file_modules.get(f)
+
+  def includes(self, f):
+    """Return the list of includes for file f."""
+    return self.file_deps.get(f, [])
+
+  def included_by(self, f):
+    """Return the list of files which include file f."""
+    return sorted([s for s, deps in self.file_deps.iteritems() if f in deps])
+
+  def reason(self, src, dst):
+    """Return the list of files in module 'src' which include files from module 'dst'."""
+    results = {}
+    srcfiles = self.contents(src)
+    for s in self.contents(src):
+      incs = [d for d in self.file_deps[s] if self.file_modules[d] == dst]
+      if incs:
+        results[s] = incs
+    return results
+
+
+class CommandInterpreter(object):
+  def __init__(self, deps_obj):
+    self.deps_obj = deps_obj
+    self.commands = ('root', 'incoming', 'outgoing', 'contents', 'module_for', 'includes', 'included_by', 'reason')
+    self.special_commands = ('quit', 'exit', 'help')
+    self.help = {}
+    for cmd in self.commands:
+      self.help[cmd] = getattr(self.deps_obj, cmd).__doc__
+    self.help['quit'] = "Exit the program and return to the command line."
+    self.help['exit'] = self.help['quit']
+    self.help['help'] = "Display a help message on any of the commands."
+    self.help['commands'] = "\n  " + "\n  ".join(self.commands + self.special_commands)
+    self.help['modules'] = "\n  " + "\n  ".join(self.deps_obj.modules)
+    self.all_words = self.commands + self.special_commands + tuple(self.deps_obj.modules)
+    self.completion_prefix = None
+    self.completions = []
+
+  def completer(self, text, state):
+    if text != self.completion_prefix:
+      self.completions = [word for word in self.all_words if word.startswith(text)]
+      self.completion_prefix = text
+    return self.completions[state] if state < len(self.completions) else None
+
+  def run(self):
+    readline.parse_and_bind("tab: complete")
+    readline.set_completer(self.completer)
+    while True:
+      #line = raw_input("depexplorer> ").strip()
+      line = raw_input("\033[0;32mdepexplorer> \033[0m").strip()
+      if not line:
+        continue
+      parts = line.split()
+      cmd, args = parts[0], parts[1:]
+      cmd = cmd.lower()
+      if cmd in ('quit', 'exit'):
+        break
+      elif cmd == 'help':
+        if not args:
+          print "Enter 'help commands' to get a list of the available commands."
+          print "Enter 'help modules' to get a list of the available modules."
+          print "Enter 'help <command name>' to get info about a specific command."
+        elif args[0] not in self.help:
+          print "Unknown command name: %s" % args[0]
+        else:
+          print "%s: %s" % (args[0], self.help[args[0]])
+      elif cmd == 'reason':
+        results = self.deps_obj.reason(*args)
+        for s in sorted(results.keys()):
+          print "%s:" % s
+          for d in results[s]:
+            print "  %s" % d
+      elif cmd in self.commands:
+        results = getattr(self.deps_obj, cmd)(*args)
+        for r in results:
+          print r
+      else:
+        print "Unknown command: %s" % cmd
+
+
+def ancestor_dirs(path):
+  path = os.path.normpath(os.path.abspath(path))
+  old_path = ""
+  while old_path != path:
+    yield path
+    old_path = path
+    path = os.path.dirname(path)
+
+
+def find_module_list(start_at):
+  if os.path.isfile(start_at):
+    return start_at
+  candidates = [os.path.join(d, "modules.txt") for d in ancestor_dirs(start_at)]
+  for path in candidates:
+    if os.path.exists(path):
+      return path
+    if not search_parents:
+      break
+  return None
+
+
+def parse_module_list(module_list_filename):
+  modules = []
+  rootdir = os.path.dirname(module_list_filename)
+  with open(module_list_filename) as f:
+    for line in f:
+      name, root = [s.strip() for s in line.split()]
+      if not os.path.isabs(root):
+        root = os.path.normpath(os.path.join(rootdir, root))
+      modules.append( (name, root) )
+  return modules
+
+
+def main():
+  start_at = os.getcwd()
+  if len(sys.argv) > 1:
+    start_at = sys.argv[1]
+ 
+  module_list = parse_module_list(find_module_list(start_at))
+  deps_obj = Deps(module_list)
+
+  print >> sys.stderr, "Building file-to-module map..."
+  deps_obj.build_file_module_map()
+
+  print >> sys.stderr, "Building intra-file dependencies map..."
+  deps_obj.build_file_deps_map()
+
+  print >> sys.stderr, "Gathering module dependencies..."
+  deps_obj.build_module_deps_map()
+
+  interpreter = CommandInterpreter(deps_obj)
+  interpreter.run()
+    
+
+if __name__ == '__main__':
+  main()
+
