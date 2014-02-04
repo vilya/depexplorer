@@ -17,13 +17,13 @@ If the script is in your path & has execute permission:
 
   depexplorer [ _file-or-dir_ ]
 
-The <file-or-dir> argument is optional. It can be either the path to a module
+The _file-or-dir_ argument is optional. It can be either the path to a module
 list file (see below) or to a directory. If it's a directory, then we will
 check for the module list file inside that directory; if it doesn't exist
 there, we'll look in the parent directory; and so on, until we reach the root
 of the filesystem.
 
-If you don't provide the <file-or-dir> argument, we search upwards from the
+If you don't provide the _file-or-dir_ argument, we search upwards from the
 current working directory.
 
 Note that unless you specify a filename explcitly on the command line, we
@@ -38,11 +38,11 @@ source code and how it's divided up into modules.
 
 Each line of the file has the form
 
-  <module-name> <module-root>
+  _module-name_ _module-root_
 
-Where <module-name> is a short displayable name for the module, which you can
+Where _module-name_ is a short displayable name for the module, which you can
 use as input to the various commands which take modules as arguments; and
-<module-root> is the path to the root directory containing the module's source
+_module-root_ is the path to the root directory containing the module's source
 code. If the module root is a relative path, it's treated as relative to the
 directory containing the module list file.
 
@@ -60,10 +60,10 @@ When you run depexplorer, you'll see a prompt. There's an interactive help
 system which can provide information on the available commands and list all of
 the known modules:
 
-  depexplorer> help
-  Enter 'help commands' to get a list of the available commands.
-  Enter 'help modules' to get a list of the available modules.
-  Enter 'help <command name>' to get info about a specific command.
+    depexplorer> help
+    Enter 'help commands' to get a list of the available commands.
+    Enter 'help modules' to get a list of the available modules.
+    Enter 'help <command name>' to get info about a specific command.
   
 
 Bugs, feedback and contributions
