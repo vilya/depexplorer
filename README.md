@@ -15,7 +15,7 @@ Running
 
 If the script is in your path & has execute permission:
 
-  depexplorer [ <file-or-dir> ]
+  depexplorer [ _file-or-dir_ ]
 
 The <file-or-dir> argument is optional. It can be either the path to a module
 list file (see below) or to a directory. If it's a directory, then we will
