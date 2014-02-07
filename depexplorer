@@ -88,7 +88,7 @@ class Deps(object):
 
   def module_for(self, f):
     """Return the name of the module that file f belongs to."""
-    return self.file_modules.get(f)
+    return [self.file_modules.get(f)]
 
   def includes(self, f):
     """Return the list of includes for file f."""
