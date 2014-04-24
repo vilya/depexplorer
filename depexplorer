@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import os, re, sys
+import fnmatch, os, re, subprocess, sys, tempfile
 import optparse
 import readline
 
@@ -108,11 +108,83 @@ class Deps(object):
         results[s] = incs
     return results
 
+  def add_module(self, m):
+    """Add a new module (in-memory only, not on disk), to allow what-if analyses."""
+    if m not in self.modules:
+      self.modules.append(m)
+      self.module_roots[m] = ""
+      self.module_deps[m] = set([])
+
+  def del_module(self, m):
+    """Remove a module (in-memory only, not on disk), to help with what-if analyses. If the module is not empty, this will fail."""
+    if m not in self.modules:
+      return
+    for _, m2 in self.file_modules:
+      if m2 == m:
+        raise Exception("module %s isn't empty" % m)
+    if m in self.modules:
+      self.modules.remove(m)
+      del self.module_roots[m]
+
+  def move(self, *args):
+    """Move files from one module to another (in-memory only, not on disk), to allow what-if analyses.  If the dst module doesn't exist, this will fail."""
+    if len(args) < 2:
+      return
+    srcs, dst = args[:-1], args[-1]
+    if dst not in self.modules:
+      raise Exception("module %s doesn't exist" % dst)
+    for s in srcs:
+      if s in self.file_modules:
+        self.file_modules[s] = dst
+      elif isglob(s):
+        for s2 in fnmatch.filter(self.file_modules.keys(), s):
+          self.file_modules[s2] = dst
+    self.build_module_deps_map()
+
+  def graph_all(self):
+    """Display a graph in xdot of all inter-module dependencies."""
+    f = tempfile.NamedTemporaryFile(mode="w", delete=False)
+    print >> f, "digraph G {"
+    print >> f, "  rankdir=LR;"
+    for m in self.modules:
+      print >> f, '  "%s";' % m
+    for m, deps in self.module_deps.iteritems():
+      for m2 in sorted(deps):
+        print >> f, '  "%s" -> "%s";' % (m, m2)
+    print >> f, "}"
+    f.close()
+    subprocess.call("xdot %s" % f.name, shell=True)
+    os.remove(f.name)
+
+  def graph_module(self, m):
+    """Display a graph in xdot of the incoming and outgoing module dependencies for module m."""
+    if m not in self.modules:
+      raise Exception("module %s doesn't exist" % m)
+    deps_in = self.incoming(m)
+    deps_out = self.outgoing(m)
+    f = tempfile.NamedTemporaryFile(mode="w", delete=False)
+    print >> sys.stderr, "Writing graph to %s" % f.name
+    print >> f, "digraph G {"
+    print >> f, "  rankdir=LR;"
+    print >> f, '  "%s";' % m
+    for m2 in sorted(set(deps_in + deps_out)):
+      print >> f, '  "%s";' % m2
+    for m2 in sorted(deps_in):
+        print >> f, '  "%s" -> "%s";' % (m2, m)
+    for m2 in sorted(deps_out):
+        print >> f, '  "%s" -> "%s";' % (m, m2)
+    print >> f, "}"
+    f.close()
+    subprocess.call("xdot %s" % f.name, shell=True)
+    os.remove(f.name)
+
 
 class CommandInterpreter(object):
   def __init__(self, deps_obj):
     self.deps_obj = deps_obj
-    self.commands = ('root', 'incoming', 'outgoing', 'contents', 'module_for', 'includes', 'included_by', 'reason')
+    self.no_result_commands = ( 'add_module', 'del_module', 'move', 'graph_all', 'graph_module' )
+    self.commands = ( 'root', 'incoming', 'outgoing', 'contents',
+                      'module_for', 'includes', 'included_by', 'reason' ) + self.no_result_commands
     self.special_commands = ('quit', 'exit', 'help')
     self.help = {}
     for cmd in self.commands:
@@ -122,13 +194,15 @@ class CommandInterpreter(object):
     self.help['help'] = "Display a help message on any of the commands."
     self.help['commands'] = "\n  " + "\n  ".join(self.commands + self.special_commands)
     self.help['modules'] = "\n  " + "\n  ".join(self.deps_obj.modules)
-    self.all_words = self.commands + self.special_commands + tuple(self.deps_obj.modules)
+    self.all_words = self.commands + self.special_commands
     self.completion_prefix = None
     self.completions = []
 
   def completer(self, text, state):
     if text != self.completion_prefix:
       self.completions = [word for word in self.all_words if word.startswith(text)]
+      self.completions += [word for word in self.deps_obj.modules if word.startswith(text)]
+      self.completions += [word for word in self.deps_obj.file_modules.keys() if word.startswith(text)]
       self.completion_prefix = text
     return self.completions[state] if state < len(self.completions) else None
 
@@ -160,6 +234,11 @@ class CommandInterpreter(object):
           print "%s:" % s
           for d in results[s]:
             print "  %s" % d
+      elif cmd in self.no_result_commands:
+        try:
+          getattr(self.deps_obj, cmd)(*args)
+        except Exception, e:
+          print >> sys.stderr, "Error: %s" % str(e)
       elif cmd in self.commands:
         results = getattr(self.deps_obj, cmd)(*args)
         for r in results:
